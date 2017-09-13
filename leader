@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+
+import sys
+import pickle
+import os.path
+import time
+import boto.utils
+import boto.beanstalk
+
+good_statuses = ('Launching', 'Updating', 'Ready')
+
+def get_identity() :
+    file_path = '/tmp/identity.dat'
+    if  (os.path.isfile(file_path)) and (os.stat(file_path).st_size > 0):
+        file_handle = open(file_path, 'rb')
+        return pickle.load(file_handle)
+    else:
+        identity_document = boto.utils.get_instance_identity()
+        file_handle = open(file_path, 'wb')
+        pickle.dump(identity_document, file_handle)
+        return identity_document
+
+def get_envs(region) :
+    file_path = '/tmp/envs.dat'
+    if  (os.path.isfile(file_path)) and (os.stat(file_path).st_size > 0):
+        file_handle = open(file_path, 'rb')
+        return pickle.load(file_handle)
+    else:
+        connection = boto.beanstalk.connect_to_region(region)
+
+        envs = (e for e in
+            connection.describe_environments()
+            ['DescribeEnvironmentsResponse']
+            ['DescribeEnvironmentsResult']
+            ['Environments']
+        )
+
+        file_handle = open(file_path, 'wb')
+
+        data = []
+
+        for env in envs:
+            if env['Status'] not in good_statuses:
+                continue
+            data.append(env['EnvironmentName'])
+
+        pickle.dump(data, file_handle)
+        return data
+
+def get_resources(region, env) :
+    file_path = '/tmp/resources.dat'
+    if  (os.path.isfile(file_path)) and (os.stat(file_path).st_size > 0) and ((os.path.getmtime(file_path) + 600) > time.time()):
+        file_handle = open(file_path, 'rb')
+        return pickle.load(file_handle)
+    else :
+        connection = boto.beanstalk.connect_to_region(region)
+
+        resources = (
+            connection.describe_environment_resources(
+                environment_name=env
+            )
+            ['DescribeEnvironmentResourcesResponse']
+            ['DescribeEnvironmentResourcesResult']
+            ['EnvironmentResources']
+        )
+
+        file_handle = open(file_path, 'wb')
+
+        pickle.dump(resources, file_handle)
+        return resources
+
+def get_eb_instances():
+    identity_document = get_identity()['document']
+
+    connection = boto.beanstalk.connect_to_region(identity_document['region'])
+    envs = get_envs(identity_document['region'])
+
+    for env in envs:
+        resources = get_resources(identity_document['region'], env)
+
+        for instance in resources['Instances']:
+            if instance['Id'] == identity_document['instanceId']:
+                return resources['Instances']
+
+    return []
+
+def check_eb_leader():
+    identity_document = get_identity()['document']
+    instances = get_eb_instances();
+    if instances:
+        instances.sort(key = lambda row: row['Id'])
+        if instances[0]['Id'] == identity_document['instanceId']:
+            return True
+
+    return False
+
+if check_eb_leader():
+    sys.exit(0)
+else:
+    sys.exit(1)
