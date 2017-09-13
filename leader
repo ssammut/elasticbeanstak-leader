@@ -48,7 +48,7 @@ def get_envs(region) :
         return data
 
 def get_resources(region, env) :
-    file_path = '/tmp/resources.dat'
+    file_path = '/tmp/resources_' + env + '.dat'
     if  (os.path.isfile(file_path)) and (os.stat(file_path).st_size > 0) and ((os.path.getmtime(file_path) + 600) > time.time()):
         file_handle = open(file_path, 'rb')
         return pickle.load(file_handle)
@@ -66,8 +66,12 @@ def get_resources(region, env) :
 
         file_handle = open(file_path, 'wb')
 
-        pickle.dump(resources, file_handle)
-        return resources
+        data = []
+        for instance in resources['Instances']:
+            data.append({'Id' : instance['Id']})
+
+        pickle.dump(data, file_handle)
+        return data
 
 def get_eb_instances():
     identity_document = get_identity()['document']
@@ -78,9 +82,9 @@ def get_eb_instances():
     for env in envs:
         resources = get_resources(identity_document['region'], env)
 
-        for instance in resources['Instances']:
+        for instance in resources:
             if instance['Id'] == identity_document['instanceId']:
-                return resources['Instances']
+                return resources
 
     return []
 
